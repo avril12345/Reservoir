@@ -1,0 +1,7 @@
+id: ny_hudson_valley
+name: Hudson Valley (Columbia / Greene / Dutchess) — configured, not yet run
+state: NY
+utility: National Grid
+towns: []          # fill with SWIS codes or town names once NY town layer is confirmed
+counties: [Columbia, Greene, Dutchess]
+weights: default

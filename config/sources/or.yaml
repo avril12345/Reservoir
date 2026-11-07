@@ -1,0 +1,28 @@
+# Oregon sources. Configured, not yet run end-to-end — see README "Region status".
+crs: 32610   # WGS84 / UTM 10N
+
+towns:
+  url: null   # ODOT city limits or county boundaries
+parcels:
+  url: null   # ORMAP statewide taxlots (geometry only; owner names come from county assessors)
+  town_id_field: COUNTY
+  id_field: MapTaxlot
+  owner_fields: {name: OWNER, care_of: null, address: OWNADDR, city: OWNCITY, state: OWNSTATE, zip: OWNZIP}
+  use_code_field: PROPCLASS
+brownfields_21e:
+  url: null   # Oregon DEQ Environmental Cleanup Site Information (ECSI)
+landfills_poly:
+  url: null
+protected_open_space:
+  url: null   # PAD-US (national) works here
+low_income_ej:
+  url: null
+hosting_capacity:
+  "PGE":
+    feeders_url: null
+    portal: https://portlandgeneral.com/about/info/hosting-capacity
+  "Pacific Power":
+    feeders_url: null
+    portal: https://www.pacificpower.net/working-with-us/interconnection.html
+smart:
+  priority_site_types: [brownfield, landfill]

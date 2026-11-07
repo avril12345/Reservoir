@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/cache/
+# Outputs contain assessor owner names and mailing addresses. They are public records, but think
+# before publishing them in a public repo; regenerate with `reservoir run` instead.
+outputs/
+data/bylaws/extractions/
+data/bylaws/ground_truth.csv

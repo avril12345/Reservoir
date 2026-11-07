@@ -1,0 +1,95 @@
+# Massachusetts sources. MassGIS layers are served from arcgisserver.digital.mass.gov and
+# services1.arcgis.com/hGdibHYSPO59RG1h (MassGIS ArcGIS Online org). Checked live 2026-11-06.
+crs: 26986   # NAD83 / Massachusetts Mainland (meters)
+
+towns:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/Census2020_Towns/FeatureServer/2
+  name_field: TOWN20
+  id_field: TOWN_ID
+  county_field: COUNTY20
+
+utility_territory:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/ElectricityProviders/FeatureServer/0
+  town_field: TOWN
+  id_field: TOWN_ID
+  utility_field: ELEC
+
+parcels:
+  url: https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0
+  town_id_field: TOWN_ID
+  id_field: LOC_ID
+  fields: [LOC_ID, MAP_PAR_ID, TOWN_ID, SITE_ADDR, CITY, USE_CODE, USE_DESC, LOT_SIZE, LOT_UNITS,
+           OWNER1, OWN_ADDR, OWN_CITY, OWN_STATE, OWN_ZIP, OWN_CO, ZONING, LAND_VAL, TOTAL_VAL, BLD_AREA, LS_DATE]
+  owner_fields: {name: OWNER1, care_of: OWN_CO, address: OWN_ADDR, city: OWN_CITY, state: OWN_STATE, zip: OWN_ZIP}
+  site_address_field: SITE_ADDR
+  use_code_field: USE_CODE
+  use_desc_field: USE_DESC
+  map_par_field: MAP_PAR_ID
+
+# --- site-type overlays (the East Light pattern: brownfields, landfills, pits, industrial) ---
+brownfields_21e:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/C21e/FeatureServer/0
+  label_fields: [RTN, NAME, STATUS]
+  note: MassDEP Chapter 21E tier-classified sites (currently active), points.
+brownfields_aul:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/AUL_Sites/FeatureServer/0
+  label_fields: [RTN, NAME, RAO_CLASS]
+  note: Activity & Use Limitation sites (closed 21E sites with land-use restrictions) — strong brownfield signal.
+landfills_poly:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/DEP_SW_Disposal_Land/FeatureServer/2
+  label_fields: [SITE_NAME, STATUS, CAP_STATUS]
+landfills_pts:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/DEP_SW_Disposal_Land/FeatureServer/0
+  label_fields: [SITE_NAME, STATUS, CAP_STATUS]
+dumping_grounds_poly:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/DEP_SW_Disposal_Land/FeatureServer/3
+  label_fields: [SITE_NAME, STATUS]
+
+# --- constraints ---
+protected_open_space:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/openspace/FeatureServer/0
+  # LEV_PROT: P = perpetuity, T = temporary, L = limited, N = none. P/T excluded; L flagged.
+  exclude_where: "LEV_PROT IN ('P','T')"
+  label_fields: [SITE_NAME, FEE_OWNER, LEV_PROT]
+buildings:
+  url: https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Building_Structures/FeatureServer/0
+  town_where: "TOWN_ID = {town_id}"
+  fields: [STRUCT_ID, AREA_SQ_FT]
+wetlands_state:
+  url: https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/DEP_Wetlands/FeatureServer/0
+  note: MassDEP wetlands (1:12,000). Used alongside NWI.
+
+# --- incentive overlays ---
+low_income_ej:
+  url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/EJ2020/FeatureServer/0
+  income_where: "EJ_CRITERIA LIKE '%I%'"
+  label_fields: [GEOID, EJ_CRIT_DESC]
+  note: MA 2020 Environmental Justice block groups. Income criterion used as a low-income proxy.
+
+# --- grid: hosting capacity by utility (field mapping normalises each portal) ---
+hosting_capacity:
+  "National Grid":
+    feeders_url: https://systemdataportal.nationalgrid.com/arcgis/rest/services/MASDP/MA_HostingCapacity_with_DGPending/MapServer/0
+    substations_url: https://systemdataportal.nationalgrid.com/arcgis/rest/services/MASDP/MASDP_Substations/MapServer/0
+    feeder_id: Master_CDF
+    substation: Substation
+    voltage_kv: Operating_Voltage_kV
+    hc_mw: HC_Available_MW_pending        # headroom net of pending DG (more conservative)
+    hc_mw_alt: HC_Available_MW
+    updated: Updated_Date
+    substation_name: NAME
+    three_phase_only: true                 # layer 0 is "Feeder Level Data 3 Phase"
+    portal: https://systemdataportal.nationalgrid.com/MA/
+  "Eversource":
+    feeders_url: null    # Eversource MA hosting capacity map requires portal login/ToS; export to GeoJSON and set feeders_file
+    feeders_file: null
+    portal: https://www.eversource.com/content/residential/about/doing-business-with-us/interconnections/massachusetts/hosting-capacity-map
+  "Unitil":
+    feeders_url: null
+    feeders_file: null
+    portal: https://unitil.com/our-company/energy-for-the-future/hosting-capacity-maps
+
+smart:
+  # SMART 3.0 (225 CMR 28) prioritises brownfields and landfills. Adder values change by block;
+  # this flag only marks eligibility categories for analyst follow-up.
+  priority_site_types: [brownfield, landfill]

@@ -1,0 +1,49 @@
+# New York sources. Configured, not yet run end-to-end — see README "Region status".
+crs: 26918   # NAD83 / UTM 18N
+
+towns:
+  url: https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Civil_Boundaries/FeatureServer/7
+  name_field: NAME
+  id_field: SWIS
+  county_field: COUNTY
+
+parcels:
+  # NYS GIS Program Office public parcels. Owner names are only published for counties that opt in
+  # (Hudson Valley: Columbia, Dutchess, Greene, Orange, Putnam, Rockland, Ulster, Westchester vary).
+  url: https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1
+  town_id_field: SWIS_CODE
+  id_field: PRINT_KEY
+  fields: "*"
+  owner_fields: {name: PRIMARY_OWNER, care_of: null, address: MAIL_ADDR, city: MAIL_CITY, state: MAIL_STATE, zip: MAIL_ZIP}
+  site_address_field: PARCEL_ADDR
+  use_code_field: PROP_CLASS     # NY ORPS property class: 3xx vacant, 7xx industrial, 720 mining/quarry, 852 landfill
+  use_desc_field: PROP_CLASS
+
+brownfields_21e:
+  url: null   # NYSDEC Environmental Remediation Sites (Brownfield Cleanup Program) — set layer URL
+landfills_poly:
+  url: null   # NYSDEC solid waste facilities / closed landfills
+protected_open_space:
+  url: null   # NYS Protected Areas Database (NYPAD)
+  exclude_where: "1=1"
+low_income_ej:
+  url: null   # NYSERDA/CJWG Disadvantaged Communities layer
+
+hosting_capacity:
+  "National Grid":
+    feeders_url: https://systemdataportal.nationalgrid.com/arcgis/rest/services/NYSDP/Hosting_Capacity_Data/MapServer/0
+    feeder_id: Master_CDF
+    substation: substation_bank_name
+    hc_mw: feeder_max_hc
+    updated: hca_refresh_date
+    three_phase_only: true
+    portal: https://systemdataportal.nationalgrid.com/NY/
+  "NYSEG":
+    feeders_url: null   # Avangrid (NYSEG/RG&E) hosting capacity portal
+    portal: https://www.nyseg.com/smartenergy/innovationtechnology/hostingcapacity
+  "Con Edison":
+    feeders_url: null
+    portal: https://www.coned.com/en/business-partners/business-opportunities/distributed-generation/hosting-capacity
+
+smart:
+  priority_site_types: [brownfield, landfill]   # NYSERDA NY-Sun / Inclusive Community Solar adders

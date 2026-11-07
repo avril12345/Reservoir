@@ -1,0 +1,85 @@
+{%- macro card() -%}
+<section class="card">
+  <header>
+    <div>
+      <div class="eyebrow">{{ region }} · Site card · generated {{ generated }}</div>
+      <h1>#{{ p['rank']|int }} · {{ p['site_address'] or 'No site address' }}, {{ p['_town']|title }}</h1>
+      <div class="sub">Parcel {{ p['parcel_id'] }}{% if p['map_par'] %} · Map/Par {{ p['map_par'] }}{% endif %} · Use {{ p['use_code'] }}{% if p['use_desc'] and p['use_desc'] != p['use_code'] %} {{ p['use_desc'] }}{% endif %}</div>
+    </div>
+    <div class="score"><span>{{ fmt(p.score, "{:.0f}") }}</span><small>/100</small></div>
+  </header>
+  <div class="grid">
+    <div class="map">
+      <img src="data:image/png;base64,{{ map_png }}" alt="Parcel map">
+      <div class="legend">
+        <span><i style="background:#f5b041"></i>Buildable</span><span><i style="background:#7fb3d5"></i>Wetland</span>
+        <span><i style="background:#aed6f1"></i>Flood (SFHA)</span><span><i style="background:#a9dfbf"></i>Protected OS</span>
+        <span><i style="background:#d7bde2"></i>Landfill</span><span><i style="background:#27ae60"></i>Feeder ≥1 MW</span>
+        <span><i style="background:#f39c12"></i>&lt;1 MW</span><span><i style="background:#c0392b"></i>0 MW</span>
+        <span>■ Substation</span><span>▲▼ 21E / AUL</span>
+      </div>
+    </div>
+    <div class="facts">
+      <h2>Site</h2>
+      <table>
+        <tr><th>Site type</th><td><b>{{ p.site_type|replace('_',' ') }}</b>{% if p.use_type != p.site_type %} (assessor: {{ p.use_type|replace('_',' ') }}){% endif %}</td></tr>
+        <tr><th>Parcel acreage</th><td>{{ fmt(p.parcel_acres) }} ac</td></tr>
+        <tr><th>Buildable (after constraints)</th><td>{{ fmt(p.buildable_acres) }} ac · largest piece {{ fmt(p.largest_contig_acres) }} ac</td></tr>
+        <tr><th>Est. capacity</th><td><b>{{ fmt(p.est_mwac, "{:.2f}") }} MWac</b></td></tr>
+        <tr><th>Constraints</th><td>wetland {{ fmt(p.wetland_share*100, "{:.0f}") }}% · flood {{ fmt(p.flood_share*100, "{:.0f}") }}% · steep {{ fmt(p.steep_share*100, "{:.0f}") }}% · forest (buildable) {{ fmt(p.forest_share_buildable*100, "{:.0f}") }}%</td></tr>
+      </table>
+      <h2>Grid</h2>
+      <table>
+        <tr><th>Nearest 3-phase feeder</th><td><b>{{ p.feeder_id or '—' }}</b> · {{ fmt(p.dist_3ph_m, "{:.0f}") }} m</td></tr>
+        <tr><th>Substation / voltage</th><td>{{ p.substation or '—' }} · {{ fmt(p.voltage_kv) }} kV</td></tr>
+        <tr><th>Hosting capacity</th><td><b>{{ fmt(p.hc_mw, "{:.2f}") }} MW</b> net of pending DG ({{ fmt(p.hc_mw_alt, "{:.2f}") }} MW excl. pending) · as of {{ p.updated or '—' }}</td></tr>
+        <tr><th>Nearest substation</th><td>{{ p.substation_nearest or '—' }} · {{ fmt(p.dist_sub_m, "{:.0f}") }} m</td></tr>
+      </table>
+      <h2>Permitting & incentives</h2>
+      <table>
+        <tr><th>Local status</th><td><b>{{ p.permitting_status|replace('_',' ') }}</b> (siting tracker)</td></tr>
+        <tr><th>Incentive overlays</th><td>{% if p.site_type in ['landfill','brownfield'] %}SMART priority category · {% endif %}{% if p.energy_community %}Energy community · {% endif %}{% if p.low_income %}Low-income / EJ block group{% endif %}{% if not (p.energy_community or p.low_income or p.site_type in ['landfill','brownfield']) %}none detected{% endif %}</td></tr>
+      </table>
+      <h2>Owner</h2>
+      <div class="owner">{{ p['owner_name'] or 'Owner not published' }}{% if p['owner_care_of'] %} · c/o {{ p['owner_care_of'] }}{% endif %}<br>{{ p['owner_address'] }}, {{ p['owner_city'] }} {{ p['owner_state'] }} {{ p['owner_zip'] }}</div>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="comps">
+      <h2>Score breakdown</h2>
+      {% for name, v in components %}<div class="bar"><span>{{ name }}</span><b style="width:{{ (v*100)|round(0) }}%"></b><em>{{ (v*100)|round(0)|int }}</em></div>{% endfor %}
+    </div>
+    <div class="flags">
+      <h2>Flags</h2>
+      <ul>{% for f in flags %}<li>{{ f }}</li>{% else %}<li>None</li>{% endfor %}</ul>
+    </div>
+  </div>
+  <footer>Screening-level only. Buildable area = parcel − {{ 'setback' }} − wetlands (+buffer) − FEMA SFHA − protected open space − slope &gt; limit. Feeder location reconstructed from the utility portal's rendered map (±~12 m). Verify hosting capacity in the utility portal{% if portal %} ({{ portal }}){% endif %} before outreach.</footer>
+</section>
+{%- endmacro -%}
+{%- if standalone -%}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if p is not none %}Site card #{{ p['rank']|int }}{% else %}Site cards{% endif %}</title>
+<style>
+:root{--ink:#1b2631;--muted:#5d6d7e;--line:#d5dbdb;--accent:#b9770e;--bg:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#eaecee;--muted:#aab7b8;--line:#424949;--bg:#17202a}}
+body{font:13px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:16px}
+.card{max-width:1050px;margin:0 auto 24px;border:1px solid var(--line);border-radius:10px;padding:16px 18px;break-after:page;page-break-after:always}
+header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:2px solid var(--accent);padding-bottom:8px}
+h1{font-size:19px;margin:2px 0}.eyebrow{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.sub{color:var(--muted)}
+.score{font-size:40px;font-weight:700;color:var(--accent);white-space:nowrap}.score small{font-size:14px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin-top:10px}.map img{width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:10.5px;color:var(--muted);margin-top:4px}.legend i{display:inline-block;width:10px;height:10px;margin-right:3px;vertical-align:-1px;border-radius:2px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:10px 0 4px}
+table{width:100%;border-collapse:collapse}th{text-align:left;font-weight:500;color:var(--muted);width:38%;vertical-align:top;padding:2px 6px 2px 0}td{padding:2px 0}
+.owner{padding:6px 8px;border:1px dashed var(--line);border-radius:6px}
+.bottom{display:grid;grid-template-columns:1fr 1.3fr;gap:16px;margin-top:8px}
+.bar{display:grid;grid-template-columns:110px 1fr 28px;align-items:center;gap:6px;margin:3px 0;font-size:11.5px}.bar b{display:block;height:8px;background:var(--accent);border-radius:4px}.bar em{font-style:normal;color:var(--muted);text-align:right}
+.flags ul{margin:0;padding-left:16px}.flags li{margin:2px 0}
+footer{margin-top:10px;font-size:10px;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
+@media (max-width:760px){.grid,.bottom{grid-template-columns:1fr}}
+@media print{body{padding:0}.card{border:none;margin:0;max-width:none}}
+</style></head><body>
+{%- if multi is defined and multi %}{% for b in multi %}{{ b }}{% endfor %}{% else %}{{ card() }}{% endif %}
+</body></html>
+{%- else -%}{{ card() }}{%- endif -%}

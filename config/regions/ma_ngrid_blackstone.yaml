@@ -1,0 +1,9 @@
+id: ma_ngrid_blackstone
+name: National Grid MA — Blackstone Valley pilot
+state: MA
+utility: National Grid
+# Pilot towns (all National Grid MA). Add towns, or set `all_utility_towns: true` to screen the
+# whole National Grid MA territory (159 towns — run overnight; everything is cached).
+towns: [UXBRIDGE, DOUGLAS, NORTHBRIDGE, SUTTON]
+all_utility_towns: false
+weights: default

@@ -1,0 +1,58 @@
+# Scoring model. Score = 100 * sum(weight_i * component_i) / sum(weight_i); every component is 0..1.
+# Change weights here, rerun `reservoir score`, and the shortlist reorders without re-fetching data.
+
+project:
+  acres_per_mwac: 5.0          # ground-mount fixed tilt incl. spacing/roads; ~4.5–6 is typical in New England
+  target_mwac: [1.0, 5.0]      # DG sweet spot (MA SMART 3.0 / NY community solar size range)
+  min_contiguous_acres: 4.0    # hard filter: smallest buildable piece worth originating
+  min_contiguous_acres_priority: 2.5   # landfills / brownfields: smaller sites still pencil with SMART adders
+  min_parcel_acres: 3.0
+  max_mwac: 5.0                # cap for DG sizing (do not credit acreage above this)
+  exclude_use_keywords: [CEMETERY, CEMETARY, GOLF, SCHOOL, EDUCATION, AIRPORT]   # matched in use description or owner name
+
+
+setbacks_m:
+  property_line: 15            # ~50 ft generic; town-specific values come from the siting tracker when known
+  wetland_buffer: 30.5         # 100 ft MA Wetlands Protection Act buffer zone
+  building_buffer: 10          # clearance around existing structures
+  slope_max_pct: 15
+
+weights:
+  site_type: 30                # brownfield / landfill / gravel pit / industrial preference (East Light pattern)
+  grid_hosting: 20             # feeder headroom vs. project size
+  grid_distance: 15            # distance to 3-phase distribution
+  size: 10                     # buildable MW within DG target band
+  permitting: 10               # from the Local Siting & Moratorium Tracker
+  incentives: 8                # SMART priority category, energy community, low-income/EJ
+  land_cover: 7                # penalise forest clearing (SMART 3.0 and local bylaws both penalise it)
+
+site_type_scores:
+  landfill: 1.0
+  brownfield: 1.0
+  gravel_pit: 0.95
+  disturbed_land: 0.80         # NLCD barren on vacant parcels: verify on imagery (pit vs. graded lot)
+  industrial_vacant: 0.85
+  industrial: 0.70
+  utility: 0.60
+  commercial: 0.45
+  agricultural: 0.30
+  vacant_other: 0.35
+  municipal_exempt: 0.40       # town-owned land: one counterparty, often old pits/landfills
+  residential: 0.10
+  excluded_use: 0.0
+  conservation: 0.0            # Article 97 / conservation-restricted land: hard-filtered out
+  other: 0.20
+
+grid:
+  full_credit_m: 150           # <= this distance to 3-phase earns full distance score
+  zero_credit_m: 2000          # >= this earns zero
+  substation_bonus_m: 1500     # within this of a substation: small bonus (cheaper interconnection)
+
+permitting_scores:
+  by_right: 1.0
+  site_plan_review: 0.9
+  special_permit: 0.6
+  not_addressed: 0.5
+  unknown: 0.5
+  moratorium: 0.05
+  prohibited: 0.0

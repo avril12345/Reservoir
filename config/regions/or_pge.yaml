@@ -1,0 +1,6 @@
+id: or_pge
+name: Portland General Electric territory — configured, not yet run
+state: OR
+utility: PGE
+towns: []
+weights: default

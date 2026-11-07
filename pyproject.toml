@@ -1,0 +1,44 @@
+[project]
+name = "reservoir-screener"
+version = "0.1.0"
+description = "DG solar+storage site screener (MA-first, then NY/OR) with an LLM-parsed local siting & moratorium tracker."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "anthropic>=2.6.0",
+    "beautifulsoup4>=4.12",
+    "folium>=0.20.0",
+    "geopandas>=1.2.0",
+    "jinja2>=3.1.6",
+    "matplotlib>=3.11.2",
+    "numpy>=2.4.6",
+    "pandas>=3.1.1",
+    "pydantic>=2.14.3",
+    "pyogrio>=0.13.0",
+    "pypdf>=5.0",
+    "pyproj>=3.7.2",
+    "pyyaml>=6.0.3",
+    "rasterio>=1.4.4",
+    "requests>=2.34.2",
+    "shapely>=2.2.0",
+    "streamlit>=1.67.0",
+    "streamlit-folium>=0.27.4",
+]
+
+[project.scripts]
+reservoir = "reservoir.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["reservoir"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
