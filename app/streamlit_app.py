@@ -26,7 +26,7 @@ from reservoir import outputs, scoring  # noqa: E402
 from reservoir.analysis import read_inputs  # noqa: E402
 from reservoir.bylaws import accuracy, tracker  # noqa: E402
 from reservoir.bylaws.schema import TownRecord  # noqa: E402
-from reservoir.config import OUTPUTS, list_regions, load_region  # noqa: E402
+from reservoir.config import IS_DEMO, OUTPUTS, list_regions, load_region  # noqa: E402
 
 st.set_page_config(page_title="Reservoir Site Screener", page_icon="☀️", layout="wide")
 st.markdown("""<style>
@@ -114,6 +114,7 @@ scored = scored_parcels(region_id, mtime(region.out_dir / "metrics.pkl"), mtime(
 lots = region_lots(region_id, mtime(region.out_dir / "lots.pkl"))
 if os.environ.get("RESERVOIR_DEMO_REDACT") == "1":  # screen recordings: mask private individuals' names/addresses
     scored, lots = outputs.redact_private_owners(region, scored, lots)
+if IS_DEMO or os.environ.get("RESERVOIR_DEMO_REDACT") == "1":  # demo_data/ is already redacted at build time
     st.sidebar.info("Demo mode: individual and trust owners are masked.")
 base = outputs.standard_fields(region, scored)
 meta = json.loads((region.out_dir / "run_meta.json").read_text()) if (region.out_dir / "run_meta.json").exists() else {}

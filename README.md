@@ -262,3 +262,14 @@ Records a narrated walkthrough to `outputs/video/reservoir_walkthrough.mp4`, plu
 subtitle file. Narration numbers and site names come from the latest run. The voice is the built-in Windows voice
 (`--voice "Microsoft David Desktop"` to change it). The app runs with `RESERVOIR_DEMO_REDACT=1`, which masks
 individual and trust owners' names and mailing addresses; businesses and public owners stay visible.
+
+## Hosted demo
+
+The hosted app (Streamlit Community Cloud, main file `app/streamlit_app.py`) runs on `demo_data/`, a committed copy
+of the `ma_ngrid_blackstone` run with individual and trust owners masked and owner fields stripped from the raw
+parcel layer. The app uses `demo_data/` only when `outputs/` holds no screened region (or set
+`RESERVOIR_OUTPUTS=demo_data`). Rebuild it after a new run with:
+
+```
+uv run python tools/build_demo_data.py --region ma_ngrid_blackstone
+```

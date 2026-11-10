@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -7,7 +8,22 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config"
-OUTPUTS = ROOT / "outputs"
+DEMO_DATA = ROOT / "demo_data"
+
+
+def _outputs_dir() -> Path:
+    """RESERVOIR_OUTPUTS if set; else outputs/ once it holds a screened region; else the committed, owner-redacted
+    demo_data/ (what the hosted demo runs on, since outputs/ is gitignored)."""
+    if os.environ.get("RESERVOIR_OUTPUTS"):
+        return Path(os.environ["RESERVOIR_OUTPUTS"]).resolve()
+    real = ROOT / "outputs"
+    if any(real.glob("*/metrics.pkl")) or not any(DEMO_DATA.glob("*/metrics.pkl")):
+        return real
+    return DEMO_DATA
+
+
+OUTPUTS = _outputs_dir()
+IS_DEMO = OUTPUTS == DEMO_DATA
 
 
 def _load(path: Path) -> dict:
