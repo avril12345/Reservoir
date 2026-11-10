@@ -4,7 +4,7 @@
     <div>
       <div class="eyebrow">{{ region }} · Site card · generated {{ generated }}</div>
       <h1>#{{ p['rank']|int }} · {{ p['site_address'] or 'No site address' }}, {{ p['_town']|title }}</h1>
-      <div class="sub">Parcel {{ p['parcel_id'] }}{% if p['map_par'] %} · Map/Par {{ p['map_par'] }}{% endif %} · Use {{ p['use_code'] }}{% if p['use_desc'] and p['use_desc'] != p['use_code'] %} {{ p['use_desc'] }}{% endif %}</div>
+      <div class="sub">{% if p['n_parcels'] and p['n_parcels'] > 1 %}<b>{{ p['lots_summary'] }}</b> · lots {{ p['member_ids'] }} · largest lot {% else %}Parcel {% endif %}{{ p['parcel_id'] }}{% if p['map_par'] %} · Map/Par {{ p['map_par'] }}{% endif %} · Use {{ p['use_code'] }}{% if p['use_desc'] and p['use_desc'] != p['use_code'] %} {{ p['use_desc'] }}{% endif %}</div>
     </div>
     <div class="score"><span>{{ fmt(p.score, "{:.0f}") }}</span><small>/100</small></div>
   </header>
@@ -16,15 +16,16 @@
         <span><i style="background:#aed6f1"></i>Flood (SFHA)</span><span><i style="background:#a9dfbf"></i>Protected OS</span>
         <span><i style="background:#d7bde2"></i>Landfill</span><span><i style="background:#27ae60"></i>Feeder ≥1 MW</span>
         <span><i style="background:#f39c12"></i>&lt;1 MW</span><span><i style="background:#c0392b"></i>0 MW</span>
-        <span>■ Substation</span><span>▲▼ 21E / AUL</span>
+        <span>■ Substation</span><span>▲▼ 21E / AUL</span><span>┈ Tax lot line</span>
       </div>
     </div>
     <div class="facts">
       <h2>Site</h2>
       <table>
         <tr><th>Site type</th><td><b>{{ p.site_type|replace('_',' ') }}</b>{% if p.use_type != p.site_type %} (assessor: {{ p.use_type|replace('_',' ') }}){% endif %}</td></tr>
-        <tr><th>Parcel acreage</th><td>{{ fmt(p.parcel_acres) }} ac</td></tr>
+        <tr><th>{% if p['n_parcels'] and p['n_parcels'] > 1 %}Site acreage{% else %}Parcel acreage{% endif %}</th><td>{{ fmt(p.parcel_acres) }} ac{% if p['n_parcels'] and p['n_parcels'] > 1 %} · {{ p['n_parcels'] }} lots, same owner{% if p['gap_joined'] %}, joined across a gap (check for a public road){% endif %}{% endif %}</td></tr>
         <tr><th>Buildable (after constraints)</th><td>{{ fmt(p.buildable_acres) }} ac · largest piece {{ fmt(p.largest_contig_acres) }} ac</td></tr>
+        <tr><th>Property-line setback</th><td>{{ fmt(p.get('setback_ft_applied'), "{:.0f}") }} ft {% if p.get('setback_source') == 'tracker' %}(town bylaw, siting tracker){% elif p.get('setback_source') == 'default' %}(default; no town setback in tracker){% endif %}</td></tr>
         <tr><th>Est. capacity</th><td><b>{{ fmt(p.est_mwac, "{:.2f}") }} MWac</b></td></tr>
         <tr><th>Constraints</th><td>wetland {{ fmt(p.wetland_share*100, "{:.0f}") }}% · flood {{ fmt(p.flood_share*100, "{:.0f}") }}% · steep {{ fmt(p.steep_share*100, "{:.0f}") }}% · forest (buildable) {{ fmt(p.forest_share_buildable*100, "{:.0f}") }}%</td></tr>
       </table>
@@ -54,7 +55,7 @@
       <ul>{% for f in flags %}<li>{{ f }}</li>{% else %}<li>None</li>{% endfor %}</ul>
     </div>
   </div>
-  <footer>Screening-level only. Buildable area = parcel − {{ 'setback' }} − wetlands (+buffer) − FEMA SFHA − protected open space − slope &gt; limit. Feeder location reconstructed from the utility portal's rendered map (±~12 m). Verify hosting capacity in the utility portal{% if portal %} ({{ portal }}){% endif %} before outreach.</footer>
+  <footer>Screening-level only. Buildable area = site − property-line setback (town bylaw if in the siting tracker, else default) − wetlands (+buffer) − FEMA SFHA − protected open space − slope &gt; limit. Feeder location reconstructed from the utility portal's rendered map (±~12 m). Verify hosting capacity in the utility portal{% if portal %} ({{ portal }}){% endif %} before outreach.</footer>
 </section>
 {%- endmacro -%}
 {%- if standalone -%}

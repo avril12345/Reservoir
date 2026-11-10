@@ -164,6 +164,7 @@ def to_record(result: ExtractionResult, checks: dict[str, str], source: str, cou
         bess_max_size_text=result.bess.max_size_text if ok("bess") else "",
         solar_setback_ft=setback(result.solar_setbacks) if ok("solar_setbacks") else None,
         bess_setback_ft=setback(result.bess_setbacks) if ok("bess_setbacks") else None,
+        from_residence_ft=result.solar_setbacks.from_residence_ft if ok("solar_setbacks") else None,
         decommissioning_required=result.decommissioning.required if ok("decommissioning") else None,
         moratoria=moratoria,
         ma_doer_model_solar_bylaw=result.ma_doer_model_solar_bylaw,

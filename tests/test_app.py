@@ -13,4 +13,5 @@ def test_app_renders():
     at = AppTest.from_file(str(ROOT / "app" / "streamlit_app.py"), default_timeout=240).run()
     assert not at.exception, [e.value for e in at.exception]
     assert len(at.tabs) == 7
-    assert any("Candidates shown" in m.label for m in at.metric)
+    assert any("Sites shown" in m.label for m in at.metric)
+    assert any("Tax lots behind these sites" in e.label for e in at.expander)

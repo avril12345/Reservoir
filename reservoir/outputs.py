@@ -15,13 +15,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from jinja2 import Template
 
-from .analysis import read_inputs
+from .analysis import owner_key, read_inputs
 from .config import Region
 from .fetch import ACRE_M2
 
 SHORTLIST_COLS = [
-    "rank", "score", "parcel_id", "_town", "site_address", "site_type", "use_type", "use_code", "use_desc",
-    "parcel_acres", "buildable_acres", "largest_contig_acres", "est_mwac",
+    "rank", "score", "parcel_id", "assemblage_id", "n_parcels", "lots_summary", "member_ids", "gap_joined",
+    "_town", "site_address", "site_type", "use_type", "use_code", "use_desc",
+    "parcel_acres", "buildable_acres", "largest_contig_acres", "est_mwac", "setback_ft_applied", "setback_source",
     "feeder_id", "substation", "voltage_kv", "hc_mw", "hc_mw_alt", "updated", "dist_3ph_m", "dist_sub_m", "substation_nearest",
     "permitting_status", "wetland_share", "flood_share", "open_space_share", "steep_share", "forest_share_buildable",
     "brownfield_rtns", "landfill_label", "energy_community", "low_income",
@@ -38,9 +39,50 @@ def standard_fields(region: Region, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def write_shortlist(region: Region, scored: gpd.GeoDataFrame, top_n: int = 50) -> gpd.GeoDataFrame:
+def redact_private_owners(region: Region, *frames: pd.DataFrame) -> list[pd.DataFrame]:
+    """For demos and screen recordings: replace individual and trust owners' names and mailing addresses with
+    stable placeholders ("Private owner 7"). Businesses and public owners stay visible. The same owner gets the
+    same placeholder in every frame, so owner grouping and assemblages still line up."""
+    pf = region.parcel_fields
+    name_c, addr_c = pf["owner_name"], pf["owner_address"]
+    keys = sorted({owner_key(n, a) or str(n) for f in frames if name_c in f
+                   for n, a in zip(f[name_c], f[addr_c] if addr_c in f else [""] * len(f))
+                   if owner_type(n) in ("individual", "trust")})
+    label = {k: f"Private owner {i + 1}" for i, k in enumerate(keys)}
+    out = []
+    for f in frames:
+        f = f.copy()
+        if name_c in f:
+            addr = f[addr_c] if addr_c in f else pd.Series("", index=f.index)
+            k = [owner_key(n, a) or str(n) for n, a in zip(f[name_c], addr)]
+            hit = pd.Series([kk in label for kk in k], index=f.index)
+            f.loc[hit, name_c] = [label[kk] for kk, h in zip(k, hit) if h]
+            for c in ("care_of", "address", "city", "zip"):
+                src = pf[f"owner_{c}"]
+                if src and src in f:
+                    f.loc[hit, src] = "(redacted)" if c == "address" else ""
+            if addr_c in f:  # keep a distinct address so owner_key still separates placeholders
+                f.loc[hit, addr_c] = [f"(redacted {label[kk].split()[-1]})" for kk, h in zip(k, hit) if h]
+        out.append(f)
+    return out
+
+
+LOT_COLS = ["rank", "score", "passes_filters", "assemblage_id", "parcel_id", "_town", "site_address", "use_code", "use_desc",
+            "use_type", "parcel_acres", "eligible", "owner_name", "owner_care_of", "owner_address", "owner_city", "owner_state", "owner_zip"]
+
+
+def site_lots(region: Region, sites: pd.DataFrame, lots: pd.DataFrame) -> pd.DataFrame:
+    """Tax lots (what you buy) behind each site (what you originate), carrying the site's rank and score."""
+    keep = sites[["assemblage_id", *[c for c in ("rank", "score", "passes_filters") if c in sites]]]
+    df = standard_fields(region, lots[lots.assemblage_id.isin(keep.assemblage_id)]).merge(keep, on="assemblage_id")
+    df = df.sort_values(["rank", "assemblage_id", "parcel_acres"], ascending=[True, True, False])
+    return df[[c for c in LOT_COLS if c in df] + (["geometry"] if "geometry" in df else [])]
+
+
+def write_shortlist(region: Region, scored: gpd.GeoDataFrame, lots: gpd.GeoDataFrame, top_n: int = 50) -> gpd.GeoDataFrame:
     d = region.out_dir
     s = standard_fields(region, scored[scored.passes_filters].head(top_n))
+    site_lots(region, s, lots).drop(columns="geometry").round(3).to_csv(d / "shortlist_lots.csv", index=False)
     cols = [c for c in SHORTLIST_COLS if c in s]
     flat = s[cols].copy()
     flat["site_flags"] = flat["site_flags"].apply(lambda f: " | ".join(f))
@@ -48,10 +90,14 @@ def write_shortlist(region: Region, scored: gpd.GeoDataFrame, top_n: int = 50) -
     geo = s[[*cols, "geometry"]].copy()
     geo["site_flags"] = geo["site_flags"].apply(lambda f: " | ".join(f))
     geo.to_crs(4326).to_file(d / "shortlist.geojson", driver="GeoJSON")
-    # Full scored table (all parcels, pass + fail) for QGIS / auditing.
+    # Full scored tables for QGIS / auditing: every site (pass + fail), and every tax lot tagged with its site.
+    gpkg = d / "scored_parcels.gpkg"
+    gpkg.unlink(missing_ok=True)
     allp = scored.drop(columns=["buildable_geom"]).copy()
     allp["site_flags"] = allp["site_flags"].apply(lambda f: " | ".join(f))
-    allp.to_file(d / "scored_parcels.gpkg", layer="parcels", driver="GPKG")
+    allp.to_file(gpkg, layer="sites", driver="GPKG")
+    al = lots.merge(scored[["assemblage_id", "rank", "score", "passes_filters"]], on="assemblage_id", how="left")
+    gpd.GeoDataFrame(al, geometry="geometry", crs=lots.crs).to_file(gpkg, layer="lots", driver="GPKG")
     bg = gpd.GeoDataFrame(s[["parcel_id", "rank"]], geometry=s["buildable_geom"], crs=scored.crs)
     bg.to_crs(4326).to_file(d / "shortlist_buildable.geojson", driver="GeoJSON")
     return s
@@ -76,14 +122,16 @@ def owner_type(name: str) -> str:
 
 
 def owner_list(region: Region, parcels: pd.DataFrame) -> pd.DataFrame:
-    """Group parcels (already passed through standard_fields) by owner + mailing address."""
+    """Group sites (already passed through standard_fields) by owner key, the same key that builds assemblages."""
     df = parcels.copy()
-    df["owner_key"] = (df.owner_name.str.upper().str.replace(r"[^A-Z0-9 ]", "", regex=True).str.replace(r"\s+", " ", regex=True)
-                       + "|" + df.owner_address.str.upper().str.replace(r"\s+", " ", regex=True))
+    # Sites with no owner key (unpublished owner or address) are not grouped with each other.
+    df["owner_key"] = [owner_key(n, a) or f"site:{i}" for i, n, a in zip(df.index, df.owner_name, df.owner_address)]
+    if "member_ids" not in df:
+        df["member_ids"], df["n_parcels"] = df["parcel_id"], 1
     g = df.groupby("owner_key").agg(
         owner_name=("owner_name", "first"), care_of=("owner_care_of", "first"), mail_address=("owner_address", "first"),
         mail_city=("owner_city", "first"), mail_state=("owner_state", "first"), mail_zip=("owner_zip", "first"),
-        parcels=("parcel_id", "count"), parcel_ids=("parcel_id", lambda s: "; ".join(map(str, s))),
+        sites=("parcel_id", "count"), parcels=("n_parcels", "sum"), parcel_ids=("member_ids", lambda s: "; ".join(map(str, s))),
         towns=("_town", lambda s: ", ".join(sorted(set(s)))), site_addresses=("site_address", lambda s: "; ".join(map(str, s))),
         total_acres=("parcel_acres", "sum"), buildable_acres=("buildable_acres", "sum"), est_mwac=("est_mwac", "sum"),
         best_score=("score", "max"), best_rank=("rank", "min"), site_types=("site_type", lambda s: ", ".join(sorted(set(s)))),
@@ -100,7 +148,7 @@ def write_owner_list(region: Region, short: gpd.GeoDataFrame) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------------------------------ site cards
-def _map_png(p, L, crs) -> str:
+def _map_png(p, L, crs, members=None) -> str:
     g = p.geometry
     view = g.buffer(max(250, (g.area ** 0.5) * 0.6))
     # Pull the nearest feeder into frame (up to 2.5 km) so the interconnection path is visible.
@@ -120,6 +168,8 @@ def _map_png(p, L, crs) -> str:
     if p.buildable_geom is not None and not p.buildable_geom.is_empty:
         gpd.GeoSeries([p.buildable_geom], crs=crs).plot(ax=ax, color="#f5b041", alpha=0.75, lw=0)
     gpd.GeoSeries([g], crs=crs).boundary.plot(ax=ax, color="#1b2631", lw=1.6)
+    if members is not None and len(members) > 1:   # tax-lot lines inside an assemblage (title still needs them)
+        members.boundary.plot(ax=ax, color="#1b2631", lw=0.6, ls=":")
     f = clip("feeders")
     if f is not None and len(f):
         f = f.clip(view)
@@ -152,11 +202,19 @@ def _map_png(p, L, crs) -> str:
 CARD = Template(open(__file__.replace("outputs.py", "templates/site_card.html.j2"), encoding="utf-8").read())
 
 
+def _member_lots(region: Region, p, L) -> gpd.GeoSeries | None:
+    pid = region.parcel_fields["parcel_id"]
+    if p.get("n_parcels", 1) <= 1 or "parcels" not in L or pid not in L["parcels"]:
+        return None
+    ids = str(p.member_ids).split("; ")
+    return L["parcels"].loc[L["parcels"][pid].astype(str).isin(ids)].geometry
+
+
 def card_context(region: Region, p, L) -> dict:
     fmt = lambda v, f="{:.1f}", d="—": d if v is None or (isinstance(v, float) and pd.isna(v)) else f.format(v)
     return {
         "region": region.name, "generated": date.today().isoformat(), "p": p,
-        "map_png": _map_png(p, L, region.crs), "fmt": fmt,
+        "map_png": _map_png(p, L, region.crs, _member_lots(region, p, L)), "fmt": fmt,
         "flags": p["site_flags"],
         "components": [("Site type", p.c_site_type), ("Feeder headroom", p.c_grid_hosting), ("3-phase distance", p.c_grid_distance),
                        ("Size", p.c_size), ("Permitting", p.c_permitting), ("Incentives", p.c_incentives), ("Land cover", p.c_land_cover)],

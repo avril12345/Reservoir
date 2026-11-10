@@ -3,8 +3,8 @@
 Open-source tools for originating distributed-generation (DG) solar + storage sites by direct site search,
 built for a two-analyst origination team:
 
-1. **Site Screener** (MA first, NY and OR configured): a Python/GeoPandas pipeline that scores every parcel in a
-   utility territory or set of towns. Scoring leans toward **landfills, brownfields, gravel pits and industrial
+1. **Site Screener** (MA first, NY and OR configured): a Python/GeoPandas pipeline that scores every site in a
+   utility territory or set of towns. A site is one tax lot, or an assemblage of same-owner neighbouring lots. Scoring leans toward **landfills, brownfields, gravel pits and industrial
    land** (the East Light pattern and SMART 3.0's brownfield/landfill priority). It produces a ranked shortlist,
    a one-page **site card** per parcel, and an **owner list** for outreach.
 2. **Local Siting & Moratorium Tracker**, an add-on to #1. Claude extracts structured fields from zoning bylaws and
@@ -19,7 +19,7 @@ Accuracy check · Method & sources.
 uv sync
 uv run reservoir run --region ma_ngrid_blackstone     # fetch (~3 min first time, cached after) + score
 uv run streamlit run app/streamlit_app.py             # open the interface
-uv run pytest                                          # 20 tests, offline
+uv run pytest                                          # 26 tests, offline
 ```
 
 `uv` installs Python 3.12 and all dependencies. No GIS install or API key is needed for the screener.
@@ -37,7 +37,8 @@ config/regions/*.yaml ──► fetch.py ─────────────
                             feeders, 3DEP, NLCD
                                    │
                                    ▼
-                         analysis.py ─────────────► buildable area, site type, constraint shares,
+                         analysis.py ─────────────► lots → same-owner assemblages → dissolved sites;
+                                   │                buildable area, site type, constraint shares,
                                    │                nearest 3-phase feeder + hosting capacity
                                    ▼
           bylaws/tracker ──► scoring.py ──────────► 0–100 score from 7 components + hard filters + flags
@@ -52,6 +53,7 @@ config/regions/*.yaml ──► fetch.py ─────────────
 | Purpose | Layer | Source |
 |---|---|---|
 | Parcels + owners | Property Tax Parcels (L3, statewide) | MassGIS |
+| Roads (splits assemblages) | MassDOT Road Inventory, all jurisdictions | MassDOT / MassGIS |
 | Towns + utility territory | Electricity Providers by Town | MassGIS |
 | Wetlands | National Wetlands Inventory + MassDEP Wetlands | USFWS, MassDEP |
 | Flood | NFHL Flood Hazard Zones (SFHA: A, AE, AH, AO, AR, A99, V, VE) | FEMA |
@@ -91,9 +93,21 @@ config/regions/*.yaml ──► fetch.py ─────────────
 | Incentives | 8 | SMART priority category (landfill/brownfield), energy community, low-income/EJ |
 | Land cover | 7 | 1 − forest share of the buildable area |
 
-**Buildable area** = parcel − 15 m setback − wetlands (+30.5 m / 100 ft buffer) − SFHA − protected open space −
-slope > 15% − buildings (+10 m). **Hard filters:** largest contiguous buildable piece ≥ 4 ac (2.5 ac for
-landfills/brownfields). Residential, conservation (Article 97), cemetery, golf, school/education and airport land is removed, even if it is on a 21E site.
+**Sites and assemblages** (`assemblage:` in the weights file). Lots ≥ 1 ac are grouped into one site when they have the
+same owner key (name + mailing address, uppercased, punctuation stripped; never name alone, never placeholders like
+OWNER UNKNOWN), sit in the same town, touch or lie within 20 m of each other, and have no mapped road between them.
+A public way makes two sites. An unbuilt paper road isn't in the road inventory, so lots across one still join and get
+a "check on imagery" flag. Residential, excluded-use and conservation lots never join. The lots are dissolved
+(sub-metre digitising slivers closed) **before** the setback and constraints, so interior lot lines don't eat
+buildable area. An assemblage is a landfill or brownfield if any member lot is. Otherwise it takes its best member's use.
+Matching is exact. Fuzzy owner matching ("SMITH JOHN" vs "SMITH JANE") is not done yet.
+
+**Buildable area** = site − property-line setback − wetlands (+30.5 m / 100 ft buffer) − SFHA − protected open space −
+slope > 15% − buildings (+10 m). The property-line setback is the town's `solar_setback_ft` from the siting tracker
+when one is stored (verified quote or reviewer entry), otherwise the 15 m (~49 ft) default. It is applied to the dissolved
+site, and each site records `setback_ft_applied` and `setback_source`. Residence and BESS setbacks are flagged, not
+applied. After a tracker setback change, rerun `reservoir score --reanalyse`. **Hard filters:** largest contiguous buildable piece of the site ≥ 4 ac (2.5 ac for
+landfills/brownfields), on sites ≥ 3 ac. Residential, conservation (Article 97), cemetery, golf, school/education and airport land is removed, even if it is on a 21E site.
 
 **Site-type precedence:** residential use wins. Otherwise landfill (MassDEP polygon ≥ 10% of the parcel, or a
 point on it) → brownfield (21E or AUL point on the parcel) → gravel pit (DOR 410–412) → disturbed land (≥ 30% NLCD barren on a vacant parcel) →
@@ -101,11 +115,14 @@ assessor use code.
 
 ### Outputs (`outputs/<region>/`)
 
-- `shortlist.csv` / `shortlist.geojson`: the top 50 passing parcels with every component and flag
-- `scored_parcels.gpkg`: every parcel, pass and fail, for QGIS auditing
-- `owner_list.csv`: grouped by owner + mailing address, with owner type (public, utility, business, trust,
-  individual), absentee flag, parcels, acres, MW, best rank
-- `cards/card_NNN_*.html` and `cards/all_cards.html`: one-page site cards (map, acreage, buildable area, feeder,
+- `shortlist.csv` / `shortlist.geojson`: the top 50 passing **sites** (what you originate) with every component and
+  flag, plus `n_parcels`, `member_ids` and a summary like "3 lots, same owner, 6.1 ac combined"
+- `shortlist_lots.csv`: the tax lots behind those sites (what you buy): one row per lot for title and deed work
+- `scored_parcels.gpkg`: layer `sites` (every site, pass and fail) and layer `lots` (every tax lot with its
+  `assemblage_id`, site rank and score) for QGIS auditing
+- `owner_list.csv`: grouped by owner key, with owner type (public, utility, business, trust,
+  individual), absentee flag, sites, lots, acres, MW, best rank
+- `cards/card_NNN_*.html` and `cards/all_cards.html`: one-page site cards (map with tax-lot lines, acreage, buildable area, feeder,
   hosting capacity, permitting, flags, owner). Print to PDF for one page per site.
 
 ### Region status
@@ -156,6 +173,47 @@ status on all three. Pilot towns are seeded as `unknown` until their bylaws are 
 | Cortlandville, NY (Cortland) | Solar and BESS moratoria extended 60 days (WXHC, 4/17/2026). The proposed 2026 BESS law reportedly **prohibits Tier 2 in all districts**. Hearing was 5/6/2026. | Adoption not confirmed, and the proposed-law PDF now returns 404. Recorded as *proposed*. |
 | Cortlandt, NY (Westchester) | Local Law 1 of 2026, adopted 7/21/2026, extends the BESS moratorium **through 12/31/2026**. | From the primary PDF, quote verified. Kept as an **entity-confusion test**: search results mix it up with Cortlandville. |
 
+### Finding the source document: discover → a person picks → extract → verify
+
+```
+uv run reservoir bylaws discover --state MA --town Uxbridge --county Worcester [--seed-url URL ...]
+uv run reservoir bylaws extract  --state MA --town Uxbridge --from-discover 1    # or --source <URL you chose>
+```
+
+`discover` collects candidate documents from several places:
+- primary URLs already in the tracker
+- guessed town hosts and their planning, zoning and DocumentCenter pages
+- code hosts (eCode360, Municode, General Code)
+- links up to two hops from those pages (the second hop stays on the same host)
+- `--seed-url`s you add
+- the Brave Search API, only if `BRAVE_SEARCH_API_KEY` is set (it never scrapes a search engine)
+
+Every query names the state and county. Each document is fetched politely and cached in
+`data/bylaws/discover_cache/`, including 403/404 errors, so nothing is retried in a loop. Documents are read the same
+way `extract` reads them, then classified (living code, clerk PDF, local law, news, staff report, proposed, model bylaw).
+
+**Set aside, never offered for extraction:**
+- dead links (403/404, host not found)
+- documents that name a different municipality, e.g. a Cortlandville law when you asked for Cortlandt
+- proposed laws, drafts and hearing notices
+- DOER, NYSERDA and MMA model bylaws
+- search, index and login pages
+- scanned PDFs with no text layer
+
+News stays in the list, ranked last, and can't be extracted.
+
+The top five go to `data/bylaws/discover/<STATE>_<Town>.json`, which also records new URLs since the last run.
+Ranking order: living code > recent town PDF > dated local law > other town pages > news.
+
+**Discovery never writes the tracker.** Permitting scores and setbacks change only after a person picks a candidate
+and `extract` runs its quote check. Human-verified records are never overwritten. The Siting tracker tab has the same
+flow under **Find likely sources**.
+
+Live check, 2026-11-07, with no search key:
+- **Uxbridge, MA:** ranked the town's *Zoning By-Laws* PDF first.
+- **Cortlandt, NY:** eCode360's Town of Cortlandt code, then the adopted LL 1-2026.
+- **Cortlandville, NY:** eCode360 *Chapter 64: Battery Energy Storage Systems*. No cross-town matches.
+
 ### Accuracy check (20 towns, hand-checked)
 
 ```
@@ -189,6 +247,18 @@ until a person does the check, because a made-up accuracy number would defeat th
 ## Limitations
 
 Screening only. This doesn't replace title work, a wetland delineation, or a utility pre-application report.
-Parcels are scored one at a time (same-owner neighbors are grouped only in the owner list). Assessor use codes
+Assemblages need an exact owner-name and mailing-address match, so related owners (family members, affiliated
+LLCs) aren't joined. NY and OR have no roads layer configured yet, so lots there can still join across a public road (they are flagged). Assessor use codes
 and owner records can lag by a year. Energy-community eligibility and federal credit applicability need a
 current-year check.
+
+## Walkthrough video
+
+```
+uv run --with playwright --with imageio-ffmpeg python tools/demo_video.py
+```
+
+Records a narrated walkthrough to `outputs/video/reservoir_walkthrough.mp4`, plus `narration_script.md` and a `.srt`
+subtitle file. Narration numbers and site names come from the latest run. The voice is the built-in Windows voice
+(`--voice "Microsoft David Desktop"` to change it). The app runs with `RESERVOIR_DEMO_REDACT=1`, which masks
+individual and trust owners' names and mailing addresses; businesses and public owners stay visible.

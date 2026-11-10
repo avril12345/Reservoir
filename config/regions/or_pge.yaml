@@ -2,5 +2,6 @@ id: or_pge
 name: Portland General Electric territory — configured, not yet run
 state: OR
 utility: PGE
+status: scaffold   # production | configured | scaffold (national layers only; readiness gaps reported, not failed)
 towns: []
 weights: default

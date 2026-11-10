@@ -26,6 +26,12 @@ parcels:
   use_desc_field: USE_DESC
   map_par_field: MAP_PAR_ID
 
+# Built roads, any jurisdiction (accepted, unaccepted, state, private). Same-owner lots with a mapped road
+# between them are two sites; an unbuilt paper road isn't in the inventory, so lots across one still join.
+roads:
+  url: https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/MassDOTRoads_gdb/FeatureServer/0
+  fields: [STREETNAME, JURISDICTN, RDTYPE]
+
 # --- site-type overlays (the East Light pattern: brownfields, landfills, pits, industrial) ---
 brownfields_21e:
   url: https://arcgisserver.digital.mass.gov/arcgisserver/rest/services/AGOL/C21e/FeatureServer/0

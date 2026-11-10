@@ -52,8 +52,43 @@ def scored_parcels(region_id: str, mtime: float, tracker_mtime: float) -> gpd.Ge
     return scoring.score(r, df)
 
 
+@st.cache_data(show_spinner=False)
+def region_lots(region_id: str, mtime: float) -> gpd.GeoDataFrame:
+    return pickle.loads((load_region(region_id).out_dir / "lots.pkl").read_bytes())
+
+
+@st.cache_data(show_spinner=False)
+def feeder_geojson(region_id: str, mtime: float, grid_m: float = 30.0) -> dict:
+    """Feeder pixels snapped to a grid_m grid, one MultiPoint feature per feeder. Same look as plotting every
+    pixel, at ~1/30 of the page weight (one marker per pixel made each rerun take ~15 s)."""
+    _, L = region_inputs(region_id, mtime)
+    fl = L.get("feeders")
+    if fl is None or fl.empty:
+        return {"type": "FeatureCollection", "features": []}
+    k = pd.DataFrame({"f": fl.feeder_id.astype(str), "hc": fl.hc_mw,
+                      "x": (fl.geometry.centroid.x // grid_m + 0.5) * grid_m,
+                      "y": (fl.geometry.centroid.y // grid_m + 0.5) * grid_m}).drop_duplicates(["f", "x", "y"])
+    pts = gpd.GeoDataFrame(k, geometry=gpd.points_from_xy(k.x, k.y), crs=fl.crs).to_crs(4326)
+    feats = []
+    for fid, d in pts.groupby("f"):
+        hc = d.hc.iloc[0]
+        col = "#c0392b" if pd.isna(hc) or hc <= 0 else "#f39c12" if hc < 1 else "#27ae60"
+        feats.append({"type": "Feature", "properties": {"feeder_id": fid, "hc_mw": None if pd.isna(hc) else round(float(hc), 2), "color": col},
+                      "geometry": {"type": "MultiPoint", "coordinates": [[round(x, 5), round(y, 5)] for x, y in zip(d.geometry.x, d.geometry.y)]}})
+    return {"type": "FeatureCollection", "features": feats}
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def card_html(region_id: str, key: tuple, _p) -> str:
+    """Rendered site card. Every tab runs on each rerun, so without this the card's map image is redrawn
+    whenever any widget changes. `key` holds everything on the card that can change between reruns."""
+    r = load_region(region_id)
+    _, L = region_inputs(region_id, mtime(r.out_dir / "inputs.gpkg"))
+    return outputs.CARD.render(**outputs.card_context(r, _p, L), standalone=True)
+
+
 def available_regions() -> list[str]:
-    return [rid for rid in list_regions() if (OUTPUTS / rid / "metrics.pkl").exists()]
+    return [rid for rid in list_regions() if (OUTPUTS / rid / "metrics.pkl").exists() and (OUTPUTS / rid / "lots.pkl").exists()]
 
 
 def mtime(p: Path) -> float:
@@ -75,7 +110,12 @@ if not regions:
     st.stop()
 region_id = st.sidebar.selectbox("Region", regions, format_func=lambda r: load_region(r).name)
 region, L = region_inputs(region_id, mtime(OUTPUTS / region_id / "inputs.gpkg"))
-base = outputs.standard_fields(region, scored_parcels(region_id, mtime(region.out_dir / "metrics.pkl"), mtime(tracker.TRACKER)))
+scored = scored_parcels(region_id, mtime(region.out_dir / "metrics.pkl"), mtime(tracker.TRACKER))
+lots = region_lots(region_id, mtime(region.out_dir / "lots.pkl"))
+if os.environ.get("RESERVOIR_DEMO_REDACT") == "1":  # screen recordings: mask private individuals' names/addresses
+    scored, lots = outputs.redact_private_owners(region, scored, lots)
+    st.sidebar.info("Demo mode: individual and trust owners are masked.")
+base = outputs.standard_fields(region, scored)
 meta = json.loads((region.out_dir / "run_meta.json").read_text()) if (region.out_dir / "run_meta.json").exists() else {}
 
 with st.sidebar.expander("Score weights (live re-rank)", expanded=False):
@@ -105,13 +145,13 @@ if f_perm:
 view = view.sort_values("score", ascending=False).head(f_n)
 
 st.sidebar.divider()
-st.sidebar.caption(f"Run: {meta.get('generated', '?')} · {meta.get('parcels_analysed', len(base)):,} parcels analysed · "
-                   f"{int(base.passes_filters.sum()):,} pass filters")
+st.sidebar.caption(f"Run: {meta.get('generated', '?')} · {len(lots):,} tax lots → {len(base):,} sites "
+                   f"({int((base.n_parcels > 1).sum()):,} same-owner assemblages) · {int(base.passes_filters.sum()):,} pass filters")
 
 # ------------------------------------------------------------------------------------------- header
 st.title(region.name)
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Candidates shown", len(view))
+c1.metric("Sites shown", len(view), help=f"{int(view.n_parcels.sum())} tax lots; {int((view.n_parcels > 1).sum())} sites are same-owner assemblages")
 c2.metric("Est. MWac (shown)", f"{view.est_mwac.sum():.1f}")
 c3.metric("Priority sites", int(view.site_type.isin(["landfill", "brownfield", "gravel_pit"]).sum()),
           help="Landfills, brownfields (21E/AUL), gravel pits")
@@ -131,16 +171,13 @@ with tabs[0]:
         twn = L["towns"].to_crs(4326)
         folium.GeoJson(twn[["town", "geometry"]], name="Towns", style_function=lambda f: {"color": "#566573", "weight": 1.5, "fill": False},
                        tooltip=folium.GeoJsonTooltip(["town"])).add_to(m)
-        fl = L.get("feeders")
-        if fl is not None and len(fl):
-            fs = fl.iloc[::6].to_crs(4326)
-            g = folium.FeatureGroup("3-phase feeders (color = headroom)")
-            for _, r in fs.iterrows():
-                hc = r.get("hc_mw")
-                col = "#c0392b" if (hc is None or pd.isna(hc) or hc <= 0) else "#f39c12" if hc < 1 else "#27ae60"
-                folium.CircleMarker([r.geometry.y, r.geometry.x], radius=1, color=col, fill=True, weight=0, fill_opacity=0.8,
-                                    tooltip=f"{r.get('feeder_id')} · {hc if pd.notna(hc) else '?'} MW").add_to(g)
-            g.add_to(m)
+        fgj = feeder_geojson(region_id, mtime(OUTPUTS / region_id / "inputs.gpkg"))
+        if fgj["features"]:
+            folium.GeoJson(fgj, name="3-phase feeders (color = headroom)",
+                           marker=folium.CircleMarker(radius=1.5, fill=True, weight=0, fill_opacity=0.9),
+                           # No tooltip: Leaflet can't bind one to a MultiPoint layer (breaks the whole map).
+                           # Parcel tooltips already show the nearest feeder and its headroom.
+                           style_function=lambda f: {"fillColor": f["properties"]["color"], "color": f["properties"]["color"]}).add_to(m)
         sub = L.get("substations")
         if sub is not None and len(sub):
             g = folium.FeatureGroup("Substations")
@@ -149,10 +186,10 @@ with tabs[0]:
                               tooltip=str(r.get("NAME", "substation"))).add_to(g)
             g.add_to(m)
         cmap = lambda s: "#1a5276" if s >= 75 else "#2e86c1" if s >= 65 else "#85c1e9"
-        cols = ["rank", "score", "site_address", "_town", "site_type", "est_mwac", "hc_mw", "feeder_id", "owner_name", "permitting_status"]
+        cols = ["rank", "score", "site_address", "_town", "site_type", "n_parcels", "est_mwac", "hc_mw", "feeder_id", "owner_name", "permitting_status"]
         folium.GeoJson(v4[[*cols, "geometry"]], name="Candidate parcels",
                        style_function=lambda f: {"color": cmap(f["properties"]["score"]), "weight": 2, "fillOpacity": 0.25},
-                       tooltip=folium.GeoJsonTooltip(cols, aliases=["Rank", "Score", "Address", "Town", "Site type", "MWac", "HC MW", "Feeder", "Owner", "Permitting"])).add_to(m)
+                       tooltip=folium.GeoJsonTooltip(cols, aliases=["Rank", "Score", "Address", "Town", "Site type", "Lots", "MWac", "HC MW", "Feeder", "Owner", "Permitting"])).add_to(m)
         bg = gpd.GeoDataFrame(view[["rank"]], geometry=view["buildable_geom"], crs=view.crs).to_crs(4326)
         bg = bg[~bg.geometry.is_empty]
         folium.GeoJson(bg, name="Buildable area", style_function=lambda f: {"color": "#b9770e", "weight": 0, "fillColor": "#f5b041", "fillOpacity": 0.6}).add_to(m)
@@ -164,7 +201,7 @@ with tabs[0]:
 
 # ------------------------------------------------------------------------------------------- shortlist
 with tabs[1]:
-    show = ["rank", "score", "_town", "site_address", "site_type", "use_desc", "parcel_acres", "buildable_acres",
+    show = ["rank", "score", "_town", "site_address", "site_type", "n_parcels", "lots_summary", "use_desc", "parcel_acres", "buildable_acres",
             "largest_contig_acres", "est_mwac", "feeder_id", "hc_mw", "dist_3ph_m", "substation", "permitting_status",
             "owner_name", *[f"c_{k}" for k in COMPONENTS]]
     t = view[show].copy()
@@ -174,7 +211,8 @@ with tabs[1]:
         column_config={
             "score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.0f"),
             "_town": "Town", "site_address": "Address", "owner_name": "Owner", "use_desc": "Assessor use",
-            "parcel_acres": st.column_config.NumberColumn("Parcel ac", format="%.1f"),
+            "n_parcels": st.column_config.NumberColumn("Lots", format="%d"), "lots_summary": "Assemblage",
+            "parcel_acres": st.column_config.NumberColumn("Site ac", format="%.1f"),
             "buildable_acres": st.column_config.NumberColumn("Buildable ac", format="%.1f"),
             "largest_contig_acres": st.column_config.NumberColumn("Largest piece ac", format="%.1f"),
             "est_mwac": st.column_config.NumberColumn("Est. MWac", format="%.2f"),
@@ -187,15 +225,25 @@ with tabs[1]:
     g = view.drop(columns=["buildable_geom"]).copy()
     g["site_flags"] = g["site_flags"].apply(lambda f: " | ".join(f))
     d2.download_button("⬇ Shortlist GeoJSON", g.to_crs(4326).to_json(), f"{region.id}_shortlist.geojson", "application/geo+json")
-    d3.caption("Full scored parcel table (pass + fail) is in `outputs/<region>/scored_parcels.gpkg` for QGIS.")
+    d3.caption("Every site (pass + fail) and every tax lot are layers `sites` and `lots` in `outputs/<region>/scored_parcels.gpkg` for QGIS.")
+    sl = outputs.site_lots(region, view, lots)
+    with st.expander(f"🧾 Tax lots behind these sites ({len(sl)} lots in {len(view)} sites): what you buy"):
+        only_multi = st.checkbox("Only assemblages (2+ lots)", value=True)
+        if only_multi:
+            sl = sl[sl.assemblage_id.isin(view.loc[view.n_parcels > 1, "assemblage_id"])]
+        lt = sl.drop(columns=["geometry"], errors="ignore")
+        st.dataframe(lt, hide_index=True, use_container_width=True,
+                     column_config={"parcel_acres": st.column_config.NumberColumn("Lot ac", format="%.2f"),
+                                    "score": st.column_config.NumberColumn("Site score", format="%.0f"), "rank": "Site rank"})
+        st.download_button("⬇ Lots CSV (title / deed research)", lt.to_csv(index=False), f"{region.id}_lots.csv", "text/csv")
 
 # ------------------------------------------------------------------------------------------- site cards
 with tabs[2]:
     if len(view):
-        opts = {f"#{int(r['rank'])} · {r['site_address'] or r['parcel_id']}, {r['_town'].title()} · {r.site_type.replace('_', ' ')} · {r.est_mwac:.1f} MWac": i for i, r in view.iterrows()}
+        opts = {f"#{int(r['rank'])} · {r['site_address'] or r['parcel_id']}, {r['_town'].title()} · {r.site_type.replace('_', ' ')}{f' · {r.n_parcels} lots' if r.n_parcels > 1 else ''} · {r.est_mwac:.1f} MWac": i for i, r in view.iterrows()}
         pick = st.selectbox("Parcel", list(opts))
         p = view.loc[opts[pick]]
-        html = outputs.CARD.render(**outputs.card_context(region, p, L), standalone=True)
+        html = card_html(region_id, (str(p["parcel_id"]), p["rank"], p["score"], tuple(p["site_flags"]), p["owner_name"]), p)
         components.html(html, height=1020, scrolling=True)
         c1, c2 = st.columns(2)
         c1.download_button("⬇ This card (HTML, print to PDF)", html, f"site_card_{p['parcel_id']}.html", "text/html")
@@ -274,6 +322,54 @@ with tabs[4]:
                 st.success("Saved. Parcel permitting scores will refresh.")
                 st.cache_data.clear()
 
+    with st.expander("🔎 Find likely sources"):
+        st.caption("Discovery suggests links: town sites, code hosts (eCode360, Municode, General Code), one hop of links from "
+                   "them, any URL you add, and web search if `BRAVE_SEARCH_API_KEY` is set. Wrong-town, draft, model-bylaw and "
+                   "dead links are set aside. **A person picks the governing document.** Extraction then runs the usual quote "
+                   "check, and human-verified records are never overwritten. Scores don't change until you extract.")
+        from reservoir.bylaws import discover as dsc
+
+        with st.form("discover"):
+            c1, c2, c3 = st.columns([1, 2, 2])
+            d_state = c1.selectbox("State", ["MA", "NY", "OR"], key="d_state")
+            d_town = c2.text_input("Municipality", key="d_town")
+            d_county = c3.text_input("County (optional)", key="d_county")
+            d_seed = st.text_input("Extra URL to check (optional)", key="d_seed")
+            d_go = st.form_submit_button("Search")
+        if d_go and d_town:
+            try:
+                with st.spinner("Fetching candidate documents (cached after the first run)…"):
+                    st.session_state["discover_res"] = dsc.discover(d_state, d_town, d_county, [d_seed] if d_seed else [],
+                                                                    progress=lambda m: None)
+            except Exception as e:
+                st.error(f"{type(e).__name__}: {e}")
+        res = st.session_state.get("discover_res")
+        if res is not None:
+            st.markdown(f"**{res.municipality}, {res.state}** · {len(res.candidates)} shown, {len(res.more)} more, "
+                        f"{len(res.rejects)} set aside · web search {'on' if res.searched_web else 'off'}"
+                        + (f" · {len(res.new_urls)} new since {res.previous_run}" if res.previous_run else ""))
+            row = lambda c: {"rank": c.rank, "kind": c.kind, "municipality_match": c.municipality_match, "title": c.title,
+                             "url": c.url, "status": c.http_status, "reason": c.reject_reason}
+            if res.candidates:
+                st.dataframe(pd.DataFrame([row(c) for c in res.candidates]).drop(columns="reason"), hide_index=True,
+                             use_container_width=True, column_config={"url": st.column_config.LinkColumn("URL")})
+                for c in res.candidates:
+                    if c.extractable and st.button(f"Extract #{c.rank}: {c.title[:70] or c.url}", key=f"dx_{c.rank}_{c.url}"):
+                        from reservoir.bylaws import extract as ex
+
+                        try:
+                            with st.spinner("Reading the document with Claude…"):
+                                new, raw = ex.extract_to_tracker(res.state, res.municipality, c.url, res.county)
+                            st.success(f"Extracted {res.municipality} from #{c.rank}. Quote check: {new.quote_check}")
+                            st.cache_data.clear()
+                        except Exception as e:  # surfaced to the analyst rather than swallowed
+                            st.error(f"{type(e).__name__}: {e}")
+            else:
+                st.info("No usable candidates. Add a URL you know, or set BRAVE_SEARCH_API_KEY to search the web.")
+            if res.rejects and st.toggle(f"Show {len(res.rejects)} set-aside links (wrong town, 403/404, drafts, model bylaws)", key="d_rej"):
+                st.dataframe(pd.DataFrame([row(c) for c in res.rejects]).drop(columns="rank"), hide_index=True,
+                             use_container_width=True, column_config={"url": st.column_config.LinkColumn("URL")})
+
     with st.expander("🤖 Extract a bylaw / local law with Claude"):
         st.caption("Paste a URL to a PDF/HTML bylaw or upload a file. Needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). "
                    "Every field must come with a verbatim quote, and code checks each quote against the source. "
@@ -351,11 +447,16 @@ with tabs[5]:
 with tabs[6]:
     st.markdown(f"""
 ### Method
-**Candidates.** Assessor parcels ≥ {region.weights['project']['min_parcel_acres']} ac in {', '.join(t.title() for t in towns)}.
+**Candidates.** Sites ≥ {region.weights['project']['min_parcel_acres']} ac in {', '.join(t.title() for t in towns)}. A site is one assessor lot,
+or an *assemblage*: lots ≥ {region.weights.get('assemblage', {}).get('min_lot_acres', '?')} ac with the same owner name + mailing address that touch or sit within
+{region.weights.get('assemblage', {}).get('max_gap_m', '?')} m of each other in the same town. Assemblages are dissolved *before* the setback and constraints, so interior lot
+lines don't eat buildable area. Residential, excluded-use and conservation lots never join one. Every tax lot is kept for title work.
 
-**Buildable area** = parcel − {region.weights['setbacks_m']['property_line']} m property-line setback − wetlands (NWI + MassDEP)
+**Buildable area** = site − property-line setback (the town's solar setback when the siting tracker has `solar_setback_ft` for it; otherwise the default
+{region.weights['setbacks_m']['property_line']} m / ~{region.weights['setbacks_m']['property_line'] / 0.3048:.0f} ft; each card shows which) − wetlands (NWI + MassDEP)
 + {region.weights['setbacks_m']['wetland_buffer']} m buffer − FEMA SFHA − protected open space (perpetual/temporary) − slope > {region.weights['setbacks_m']['slope_max_pct']}% (3DEP 10 m)
 − existing buildings + {region.weights['setbacks_m'].get('building_buffer', 10)} m. Capacity ≈ largest contiguous piece ÷ {region.weights['project']['acres_per_mwac']} ac/MWac, capped at {region.weights['project']['max_mwac']} MW.
+After changing a town's setback in the tracker, rerun `reservoir score --reanalyse` to recompute geometry; permitting-only edits rescore without it.
 
 **Site type** (East Light pattern, SMART 3.0 brownfield/landfill priority). Landfill (MassDEP solid-waste polygons/points) → brownfield
 (21E tier-classified or AUL site on the parcel) → gravel pit (DOR 410–412) → disturbed land (≥ 30% NLCD barren on a vacant parcel) → assessor use code. Residential, conservation (Article 97), and

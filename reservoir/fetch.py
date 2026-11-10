@@ -60,7 +60,9 @@ def fetch_region(region: Region, progress=print) -> dict:
     s, n, crs = region.sources, region.national, region.crs
     out = region.out_dir / "inputs.gpkg"
     towns = resolve_towns(region)
-    min_acres = region.weights["project"]["min_parcel_acres"]
+    from .analysis import min_lot_acres
+
+    min_acres = min_lot_acres(region)
     hc = region.hosting() or {}
     layers: dict[str, list[gpd.GeoDataFrame]] = {}
     raster_index = {}
@@ -90,6 +92,9 @@ def fetch_region(region: Region, progress=print) -> dict:
         b = s.get("buildings", {})
         if b.get("url"):
             add("buildings", _layer(b["url"], None, crs, where=b["town_where"].format(town_id=int(t["town_id"])), fields=b.get("fields", "*")), town)
+
+        rd = s.get("roads", {})
+        add("roads", _layer(rd.get("url"), bbox, crs, fields=rd.get("fields", "*")), town)
 
         progress(f"[{town}] site-type overlays: 21E, AUL, landfills")
         for key in ("brownfields_21e", "brownfields_aul", "landfills_poly", "landfills_pts", "dumping_grounds_poly"):

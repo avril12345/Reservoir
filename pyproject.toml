@@ -42,3 +42,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-p tests.report_plugin"
+filterwarnings = ["ignore::DeprecationWarning:streamlit.*"]

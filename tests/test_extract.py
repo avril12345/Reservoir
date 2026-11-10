@@ -94,3 +94,26 @@ def test_quote_check_tolerates_pdf_whitespace():
     src = extract._norm("The moratorium herein shall be extended through Decem-\nber 31, 2026 unless   terminated earlier.")
     assert extract.check_quote("The moratorium herein shall be extended through December 31, 2026 unless terminated earlier.", src) == "verbatim"
     assert extract.check_quote("The moratorium shall last 365 days.", src) == "not_found"
+
+
+def test_failed_quote_check_never_reaches_geometry(monkeypatch):
+    """A solar setback whose quote isn't in the source is dropped by to_record, so geometry uses the default."""
+    import copy
+
+    from reservoir.analysis import property_line_m
+    from reservoir.bylaws import tracker
+    from reservoir.bylaws.schema import ExtractionResult
+    from reservoir.config import load_region
+
+    bad = copy.deepcopy(CANNED)
+    bad["solar_setbacks"] = {"front_ft": 100, "side_ft": 100, "rear_ft": 100, "from_residence_ft": 300,
+                             "evidence": EV("Solar arrays shall be set back 100 feet from every lot line.", "§ 9")}
+    result = ExtractionResult.model_validate(bad)
+    text, _ = extract.load_source(str(DOC))
+    checks = extract.verify(result, text)
+    assert checks["solar_setbacks"] == "not_found"
+    rec = extract.to_record(result, checks, str(DOC))
+    assert rec.solar_setback_ft is None and rec.from_residence_ft is None
+    region = load_region("ma_ngrid_blackstone")
+    metres, source, _ = property_line_m(region, "Cortlandt", {tracker.key(region.state, "Cortlandt"): rec.model_copy(update={"state": "MA"})})
+    assert (metres, source) == (15, "default")

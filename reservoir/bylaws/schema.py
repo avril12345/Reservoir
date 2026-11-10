@@ -84,6 +84,7 @@ class TownRecord(BaseModel):
     bess_max_size_text: str = ""
     solar_setback_ft: float | None = None
     bess_setback_ft: float | None = None
+    from_residence_ft: float | None = Field(default=None, description="Solar setback from residences/residential lines, if stated separately. Flagged, never applied to geometry (no residences layer).")
     decommissioning_required: bool | None = None
     moratoria: list[Moratorium] = []
     ma_doer_model_solar_bylaw: bool | None = None

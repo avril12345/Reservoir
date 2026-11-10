@@ -10,9 +10,14 @@ project:
   max_mwac: 5.0                # cap for DG sizing (do not credit acreage above this)
   exclude_use_keywords: [CEMETERY, CEMETARY, GOLF, SCHOOL, EDUCATION, AIRPORT]   # matched in use description or owner name
 
+assemblage:                    # second grain: same-owner neighbouring lots dissolved into one site before constraints
+  enabled: true
+  max_gap_m: 20                # bridges a paper road or survey sliver. A 40–50 ft public ROW is 12–15 m, so gap-joined
+                               # sites are flagged for a road check (no roads layer yet). Never joins across towns.
+  min_lot_acres: 1.0           # lots this small are fetched and can join an assemblage; sites still need min_parcel_acres
 
 setbacks_m:
-  property_line: 15            # ~50 ft generic; town-specific values come from the siting tracker when known
+  property_line: 15            # ~50 ft generic default; analysis.py uses the tracker's solar_setback_ft for a town when stored
   wetland_buffer: 30.5         # 100 ft MA Wetlands Protection Act buffer zone
   building_buffer: 10          # clearance around existing structures
   slope_max_pct: 15

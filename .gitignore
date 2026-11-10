@@ -8,3 +8,5 @@ data/cache/
 outputs/
 data/bylaws/extractions/
 data/bylaws/ground_truth.csv
+test_reports/
+data/bylaws/discover_cache/

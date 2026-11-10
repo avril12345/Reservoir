@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .analysis import setback_flags
 from .bylaws import tracker
 from .config import Region
 
@@ -60,6 +61,10 @@ def score(region: Region, df: pd.DataFrame) -> pd.DataFrame:
         rec = towns.get(tracker.key(region.state, str(r["_town"])))
         c_perm, pflags, perm_label = tracker.permitting_assessment(rec, ps)
         flags += pflags
+        if pd.notna(r.get("setback_ft_applied")):
+            flags += setback_flags(region, r["_town"], r["setback_ft_applied"], r["setback_source"], towns)
+        else:
+            flags.append("Geometry predates town-specific setbacks. Rerun `reservoir score --reanalyse`")
 
         inc = 0.0
         if r.site_type in smart_types:
@@ -79,6 +84,11 @@ def score(region: Region, df: pd.DataFrame) -> pd.DataFrame:
             flags.append(f"{r.flood_share:.0%} in FEMA SFHA")
         if r.open_space_share > 0.0:
             flags.append(f"{r.open_space_share:.0%} protected open space (excluded)")
+        if r.get("n_parcels", 1) > 1:
+            flags.append(f"Assemblage: {r.lots_summary}. Title and option each lot ({r.member_ids})")
+            if r.get("gap_joined"):
+                flags.append(f"Lots joined across a gap of up to {w.get('assemblage', {}).get('max_gap_m', 20)} m. "
+                             "Check it is a paper road, not a public way (which would make two sites)")
         if r.site_type == "landfill":
             flags.append(f"Landfill: {r.landfill_label or 'MassDEP solid-waste layer'} — check cap status / post-closure use permit")
         if r.site_type == "brownfield":
